@@ -68,63 +68,61 @@ def main():
 
     chapters_count = 0
 
-    for li in navbar.xpath('./li'):
-        first_level_items = [li]
-        first_level_items.extend(li.xpath('./ul/li'))
-        for fli in first_level_items:
-            content_links = []
-            if root_link := fli.cssselect('a[insights]'):
-                content_links.append(root_link[0].get('href'))
-                for subchapter_link in fli.cssselect('div[style*="display:none"] li a[insights]'):
-                    content_links.append(subchapter_link.get('href'))
-            
-            if not content_links:
-                continue
-            
-            chapter_content = '<html><body>'
-            for i, cl in enumerate(content_links):
-                while True:
-                    try:
-                        content = client.get(f'{gitbook_root}{cl}').text
-                        dom = html.fromstring(content)
-                        
-                        # processing templates
-                        def _process_template(tpl: re.Match):
-                            tpl_id = tpl.group(1)
-                            repl_id = re.search(fr'\$RC\("{tpl_id}","(.*?)"\)', content)
-                            if not repl_id:
-                                repl_id = re.search(fr'\$RS\("([^"]+)","{tpl_id}"\)', content)
-                            repl_id = repl_id.group(1)
-                            repl = dom.cssselect(f'div[id="{repl_id}"]')[0]
-                            return etree.tostring(repl, encoding='unicode', method='html', with_tail=True)
+    for fli in navbar.xpath('//a[@insights][not(ancestor::div[contains(@style, "display:none")])]'):
+        content_links = []
+        if root_link := fli.cssselect('a[insights]'):
+            root_link = root_link[0].get('href')
+            content_links.append(root_link)
+            for subchapter_link in fli.xpath('./following-sibling::div[contains(@style, "display:none")]//li//a[@insights]'):
+                content_links.append(subchapter_link.get('href'))
 
-                        while '<template' in content:
-                            content = re.sub(r'<template id="(.*?)"></template>', _process_template, content)
-                            content = content.replace('<div hidden', '<div')
-                        dom = html.fromstring(content)
+        if not content_links:
+            continue
 
-                        if 0 == i:
-                            title = dom.cssselect('main header h1')[0].text_content()
+        chapter_content = '<html><body>'
+        for i, cl in enumerate(content_links):
+            while True:
+                try:
+                    content = client.get(f'{gitbook_root}{cl}').text
+                    dom = html.fromstring(content)
+                    
+                    # processing templates
+                    def _process_template(tpl: re.Match):
+                        tpl_id = tpl.group(1)
+                        repl_id = re.search(fr'\$RC\("{tpl_id}","(.*?)"\)', content)
+                        if not repl_id:
+                            repl_id = re.search(fr'\$RS\("([^"]+)","{tpl_id}"\)', content)
+                        repl_id = repl_id.group(1)
+                        repl = dom.cssselect(f'div[id="{repl_id}"]')[0]
+                        return etree.tostring(repl, encoding='unicode', method='html', with_tail=True)
 
-                        chapter_content += _outerhtml(dom.cssselect('main header h1')[0], book)
-                        chapter_content += _outerhtml(dom.cssselect('main > *:nth-child(2)')[0], book)
-                    except Exception as e:
-                        print(e)
-                        time.sleep(5)
-                    else:
-                        break
-            chapter_content += '</body></html>'
-            
-            fname = str(uuid4()) + '.xhtml'
-            chapter = epub.EpubHtml(title=title, file_name=fname, lang='en')
-            chapter.set_content(chapter_content)
-            book.add_item(chapter)
+                    while '<template' in content:
+                        content = re.sub(r'<template id="(.*?)"></template>', _process_template, content)
+                        content = content.replace('<div hidden', '<div')
+                    dom = html.fromstring(content)
 
-            book.toc.append(epub.Link(fname, title, fname))
-            book.spine.append(chapter)
+                    if 0 == i:
+                        title = dom.cssselect('main header h1')[0].text_content()
 
-            chapters_count += 1
-            print(f'[+] Chapter {chapters_count}: {title}')
+                    chapter_content += _outerhtml(dom.cssselect('main header h1')[0], book)
+                    chapter_content += _outerhtml(dom.cssselect('main > *:nth-child(2)')[0], book)
+                except Exception as e:
+                    print(e)
+                    time.sleep(5)
+                else:
+                    break
+        chapter_content += '</body></html>'
+        
+        fname = str(uuid4()) + '.xhtml'
+        chapter = epub.EpubHtml(title=title, file_name=fname, lang='en')
+        chapter.set_content(chapter_content)
+        book.add_item(chapter)
+
+        book.toc.append(epub.Link(fname, title, fname))
+        book.spine.append(chapter)
+
+        chapters_count += 1
+        print(f'[+] Chapter {chapters_count}: {title}')
 
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
