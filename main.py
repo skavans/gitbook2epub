@@ -64,20 +64,16 @@ def main():
     book.toc = []
     book.spine = ['nav']
 
-    navbar = dom.cssselect('aside ul')[0]
-
     chapters_count = 0
 
-    for fli in navbar.xpath('//a[@insights][not(ancestor::div[contains(@style, "display:none")])]'):
-        content_links = []
-        if root_link := fli.cssselect('a[insights]'):
-            root_link = root_link[0].get('href')
-            content_links.append(root_link)
-            for subchapter_link in fli.xpath('./following-sibling::div[contains(@style, "display:none")]//li//a[@insights]'):
-                content_links.append(subchapter_link.get('href'))
-
-        if not content_links:
-            continue
+    # searching for the non-hidden links in the left navigation bar
+    # they will be the chapters' roots
+    for first_layer_link in dom.xpath('//aside//a[@insights][not(ancestor::div[contains(@style, "display:none")])]'):
+        content_links = [first_layer_link.get('href')]
+        # now searching for the links in the sibling hidden div
+        # they will be the subchapters
+        for subchapter_link in first_layer_link.xpath('./following-sibling::div[contains(@style, "display:none")]//li//a[@insights]'):
+            content_links.append(subchapter_link.get('href'))
 
         chapter_content = '<html><body>'
         for i, cl in enumerate(content_links):
