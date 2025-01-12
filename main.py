@@ -11,15 +11,34 @@ from lxml import html, etree
 client = httpx.Client()
 
 
-
 def _outerhtml(element, book, dom=None):
     _html = etree.tostring(element, encoding='unicode', method='html', with_tail=True)
 
-    _html = re.sub(r'class=".*?"', '', _html)
+    _html = re.sub(r'class="[^"]+"', '', _html)
+    _html = re.sub(r'style="[^"]+"', '', _html)
+    _html = re.sub(r'id="[^"]+"', '', _html)
+    _html = re.sub(r'href="#[^"]*"', '', _html)
+
+    _html = re.sub(r'<button.*?</button>', '', _html)
+    _html = re.sub(r'<svg.*?</svg>', '', _html)
+    _html = re.sub(r'<math.*?</math>', '', _html)
+
+    for elem_to_remove in ('div', 'pre'):
+        _html = re.sub(rf'</?{elem_to_remove}[^>]*>', '', _html)
+
+    # remove empty paragraphs
+    _html = re.sub(r'<p[^>]*>\s*</p>', '', _html, flags=re.DOTALL)
 
     # codeblock fix
     def _fix_codeblock(codeblock):
-        return f"<code monospace font-family='monospace'>\n{re.sub(r'<.*?>', '', codeblock.group(0))}\n</code>"
+        is_inline = '<span' not in codeblock.group(0)
+
+        code = re.sub(r'<.*?>', '', codeblock.group(0)).lstrip()
+
+        if not is_inline:
+            return f"""<pre class="code-block"><code>\n{code}\n</code></pre>"""
+        else:
+            return f"""<code class="code-inline">{code}</code>"""
     _html = re.sub('<code.*?</code>', _fix_codeblock, _html, flags=re.DOTALL)
 
     # images processing
@@ -57,6 +76,7 @@ def main():
     dom = html.fromstring(content)
 
     book = epub.EpubBook()
+
     book.set_identifier(str(uuid4()))
     book.set_title(book_title)
     book.set_language('en')
@@ -64,11 +84,41 @@ def main():
     book.toc = []
     book.spine = ['nav']
 
+    style = epub.EpubItem(
+        uid="style",
+        file_name="style/style.css",
+        media_type="text/css",
+        content='''
+            .code-block {
+                font-family: 'Courier New', monospace; 
+                font-size: 0.7em; 
+                background-color: #f5f5f5;
+                padding: 0.5em;
+                margin: 1em 0;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                line-height: 1.2;
+                text-align: left;
+            }
+
+            .code-inline {
+                font-family: 'Courier New', monospace; 
+                background-color: #f5f5f5;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+        '''.encode('utf-8')
+    )
+    book.add_item(style)
+
     chapters_count = 0
 
     # searching for the non-hidden links in the left navigation bar
     # they will be the chapters' roots
     for first_layer_link in dom.xpath('//aside//a[@insights][not(ancestor::div[contains(@style, "display:none")])]'):
+        
+        chapters_count += 1
+        
         content_links = [first_layer_link.get('href')]
         # now searching for the links in the sibling hidden div
         # they will be the subchapters
@@ -112,17 +162,18 @@ def main():
         fname = str(uuid4()) + '.xhtml'
         chapter = epub.EpubHtml(title=title, file_name=fname, lang='en')
         chapter.set_content(chapter_content)
+        chapter.add_item(style)
         book.add_item(chapter)
 
         book.toc.append(epub.Link(fname, title, fname))
         book.spine.append(chapter)
 
-        chapters_count += 1
         print(f'[+] Chapter {chapters_count}: {title}')
 
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
     epub.write_epub(out_file, book)
+
 
 if __name__ == "__main__":
     main()
